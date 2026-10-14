@@ -16,6 +16,16 @@ class CustomerRepository {
     required int limitCount,
   }) => _dataSource.watchFirstCustomers(limitCount: limitCount);
 
+  Future<CustomerQuerySnapshot> searchCustomersByNamePrefix({
+    required String prefix,
+    DocumentSnapshot<Map<String, dynamic>>? startAfterDocument,
+    required int limitCount,
+  }) => _dataSource.searchCustomersByNamePrefix(
+    prefix: prefix,
+    startAfterDocument: startAfterDocument,
+    limitCount: limitCount,
+  );
+
   Future<CustomerQuerySnapshot> fetchCustomers({
     required DocumentSnapshot<Map<String, dynamic>> startAfterDocument,
     required int limitCount,

@@ -18,6 +18,12 @@ class CustomerQuerySnapshot {
 abstract interface class CustomerDataSource {
   Stream<CustomerQuerySnapshot> watchFirstCustomers({required int limitCount});
 
+  Future<CustomerQuerySnapshot> searchCustomersByNamePrefix({
+    required String prefix,
+    DocumentSnapshot<Map<String, dynamic>>? startAfterDocument,
+    required int limitCount,
+  });
+
   Future<CustomerQuerySnapshot> fetchCustomers({
     required DocumentSnapshot<Map<String, dynamic>> startAfterDocument,
     required int limitCount,
@@ -43,6 +49,21 @@ class FirestoreCustomerDataSource implements CustomerDataSource {
       .limit(limitCount)
       .snapshots(includeMetadataChanges: true)
       .map(_toCustomerQuerySnapshot);
+
+  @override
+  Future<CustomerQuerySnapshot> searchCustomersByNamePrefix({
+    required String prefix,
+    DocumentSnapshot<Map<String, dynamic>>? startAfterDocument,
+    required int limitCount,
+  }) async {
+    var query = _customersQuery.startAt([prefix]).endAt(['$prefix\uf8ff']);
+    if (startAfterDocument != null) {
+      query = query.startAfterDocument(startAfterDocument);
+    }
+
+    final snapshot = await query.limit(limitCount).get();
+    return _toCustomerQuerySnapshot(snapshot);
+  }
 
   @override
   Future<CustomerQuerySnapshot> fetchCustomers({

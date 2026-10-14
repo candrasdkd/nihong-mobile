@@ -52,6 +52,8 @@ class CustomersScreen extends ConsumerWidget {
                 ),
               ),
             ),
+            if (state.isSearchingNames)
+              const LinearProgressIndicator(minHeight: 2),
             if (state.isFromCache) const _CacheNotice(),
             if (state.errorMessage != null && state.customers.isNotEmpty)
               _CustomersErrorNotice(
@@ -74,7 +76,9 @@ class CustomersScreen extends ConsumerWidget {
               const Expanded(child: _EmptyCustomers())
             else if (state.status == CustomersStatus.data && customers.isEmpty)
               Expanded(
-                child: state.hasMore
+                child: state.isSearchingNames
+                    ? const Center(child: CircularProgressIndicator())
+                    : state.hasMoreResults
                     ? NotificationListener<ScrollNotification>(
                         onNotification: (notification) {
                           if (_shouldLoadMoreOnScroll(notification)) {
@@ -92,6 +96,9 @@ class CustomersScreen extends ConsumerWidget {
                               onPressed: viewModel.loadMore,
                               isLoading: state.isLoadingMore,
                               errorMessage: state.errorMessage,
+                              label: state.hasMoreNameSearchResults
+                                  ? 'Muat hasil nama berikutnya'
+                                  : 'Muat data lainnya',
                             ),
                           ],
                         ),
@@ -102,14 +109,14 @@ class CustomersScreen extends ConsumerWidget {
               Expanded(
                 child: Column(
                   children: [
-                    if (state.isLoading)
-                      const LinearProgressIndicator(minHeight: 2),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          '${customers.length} cocok • ${state.customers.length} data dimuat',
+                          state.query.trim().isEmpty
+                              ? '${customers.length} cocok • ${state.customers.length} data dimuat'
+                              : '${customers.length} cocok • awalan nama dicari di semua data',
                           style: const TextStyle(
                             color: AppColors.textMuted,
                             fontSize: 13,
@@ -128,7 +135,8 @@ class CustomersScreen extends ConsumerWidget {
                         },
                         child: ListView.separated(
                           padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                          itemCount: customers.length + (state.hasMore ? 1 : 0),
+                          itemCount:
+                              customers.length + (state.hasMoreResults ? 1 : 0),
                           separatorBuilder: (_, _) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             if (index >= customers.length) {
@@ -136,8 +144,11 @@ class CustomersScreen extends ConsumerWidget {
                                 onPressed: viewModel.loadMore,
                                 isLoading: state.isLoadingMore,
                                 errorMessage: state.errorMessage,
-                                label:
-                                    'Muat ${FirestorePageSize.value} pelanggan lainnya',
+                                label: state.query.trim().isEmpty
+                                    ? 'Muat ${FirestorePageSize.value} pelanggan lainnya'
+                                    : state.hasMoreNameSearchResults
+                                    ? 'Muat hasil nama berikutnya'
+                                    : 'Muat data lainnya',
                               );
                             }
                             return _CustomerCard(customer: customers[index]);

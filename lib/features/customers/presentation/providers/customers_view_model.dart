@@ -15,6 +15,9 @@ class CustomersState {
     this.status = CustomersStatus.loading,
     this.customers = const [],
     this.query = '',
+    this.nameSearchResults = const [],
+    this.isSearchingNames = false,
+    this.hasMoreNameSearchResults = false,
     this.isFromCache = false,
     this.hasMore = true,
     this.isLoadingMore = false,
@@ -24,12 +27,18 @@ class CustomersState {
   final CustomersStatus status;
   final List<Customer> customers;
   final String query;
+  final List<Customer> nameSearchResults;
+  final bool isSearchingNames;
+  final bool hasMoreNameSearchResults;
   final bool isFromCache;
   final bool hasMore;
   final bool isLoadingMore;
   final String? errorMessage;
 
   bool get isLoading => status == CustomersStatus.loading;
+
+  bool get hasMoreResults =>
+      !isSearchingNames && (hasMore || hasMoreNameSearchResults);
 
   List<Customer> get filteredCustomers {
     final normalizedQuery = query.trim().toLowerCase();
@@ -58,13 +67,22 @@ class CustomersState {
           );
         })
         .toList(growable: false);
-    return filteredCustomers;
+    final customersById = <String, Customer>{
+      for (final customer in filteredCustomers) customer.id: customer,
+    };
+    for (final customer in nameSearchResults) {
+      customersById.putIfAbsent(customer.id, () => customer);
+    }
+    return customersById.values.toList(growable: false);
   }
 
   CustomersState copyWith({
     CustomersStatus? status,
     List<Customer>? customers,
     String? query,
+    List<Customer>? nameSearchResults,
+    bool? isSearchingNames,
+    bool? hasMoreNameSearchResults,
     bool? isFromCache,
     bool? hasMore,
     bool? isLoadingMore,
@@ -74,6 +92,10 @@ class CustomersState {
     status: status ?? this.status,
     customers: customers ?? this.customers,
     query: query ?? this.query,
+    nameSearchResults: nameSearchResults ?? this.nameSearchResults,
+    isSearchingNames: isSearchingNames ?? this.isSearchingNames,
+    hasMoreNameSearchResults:
+        hasMoreNameSearchResults ?? this.hasMoreNameSearchResults,
     isFromCache: isFromCache ?? this.isFromCache,
     hasMore: hasMore ?? this.hasMore,
     isLoadingMore: isLoadingMore ?? this.isLoadingMore,
@@ -87,14 +109,22 @@ final customersViewModelProvider =
     );
 
 class CustomersViewModel extends Notifier<CustomersState> {
+  static const _nameSearchDebounce = Duration(milliseconds: 300);
+
   StreamSubscription<CustomerQuerySnapshot>? _subscription;
+  Timer? _nameSearchTimer;
   List<Customer> _firstPageCustomers = const [];
   List<Customer> _olderCustomers = [];
+  List<Customer> _nameSearchCustomers = [];
   List<String>? _firstPageIds;
   DocumentSnapshot<Map<String, dynamic>>? _lastDocument;
+  DocumentSnapshot<Map<String, dynamic>>? _nameSearchLastDocument;
+  String _nameSearchPrefix = '';
   bool _hasMore = true;
+  bool _hasMoreNameSearchResults = false;
   int _streamGeneration = 0;
   int _pageGeneration = 0;
+  int _nameSearchGeneration = 0;
   bool _isDisposed = false;
 
   @override
@@ -107,13 +137,39 @@ class CustomersViewModel extends Notifier<CustomersState> {
       _isDisposed = true;
       _streamGeneration++;
       _pageGeneration++;
+      _nameSearchGeneration++;
+      _nameSearchTimer?.cancel();
       unawaited(_subscription?.cancel());
     });
     return const CustomersState();
   }
 
   void setQuery(String query) {
-    state = state.copyWith(query: query);
+    final prefix = query.trim().toUpperCase();
+    _nameSearchTimer?.cancel();
+    final generation = ++_nameSearchGeneration;
+    _pageGeneration++;
+    _nameSearchPrefix = prefix;
+    _nameSearchCustomers = [];
+    _nameSearchLastDocument = null;
+    _hasMoreNameSearchResults = false;
+    state = state.copyWith(
+      query: query,
+      nameSearchResults: const [],
+      isSearchingNames: prefix.isNotEmpty,
+      hasMoreNameSearchResults: false,
+      isLoadingMore: false,
+      clearErrorMessage: true,
+    );
+
+    if (prefix.isEmpty) {
+      state = state.copyWith(isSearchingNames: false);
+      return;
+    }
+
+    _nameSearchTimer = Timer(_nameSearchDebounce, () {
+      unawaited(_searchFirstNamePage(prefix, generation));
+    });
   }
 
   void retry() {
@@ -127,9 +183,16 @@ class CustomersViewModel extends Notifier<CustomersState> {
       clearErrorMessage: true,
     );
     _subscribe(ref.read(customerRepositoryProvider));
+    if (state.query.trim().isNotEmpty) setQuery(state.query);
   }
 
   Future<void> loadMore() async {
+    if (state.query.trim().isNotEmpty && state.isSearchingNames) return;
+    if (state.query.trim().isNotEmpty && _hasMoreNameSearchResults) {
+      await _loadMoreNameSearch();
+      return;
+    }
+
     final cursor = _lastDocument;
     if (!state.hasMore ||
         state.isLoadingMore ||
@@ -219,10 +282,94 @@ class CustomersViewModel extends Notifier<CustomersState> {
         );
   }
 
+  Future<void> _searchFirstNamePage(String prefix, int generation) async {
+    if (_isDisposed || generation != _nameSearchGeneration) return;
+
+    try {
+      final page = await ref
+          .read(customerRepositoryProvider)
+          .searchCustomersByNamePrefix(
+            prefix: prefix,
+            limitCount: FirestorePageSize.value,
+          );
+      if (_isDisposed || generation != _nameSearchGeneration) return;
+
+      _nameSearchCustomers = page.customers;
+      _nameSearchLastDocument = page.lastDocument;
+      _hasMoreNameSearchResults =
+          page.customers.length >= FirestorePageSize.value;
+      state = state.copyWith(
+        nameSearchResults: _nameSearchCustomers,
+        isSearchingNames: false,
+        hasMoreNameSearchResults: _hasMoreNameSearchResults,
+        isFromCache: page.isFromCache,
+        clearErrorMessage: true,
+      );
+    } catch (error) {
+      if (_isDisposed || generation != _nameSearchGeneration) return;
+      state = state.copyWith(
+        isSearchingNames: false,
+        errorMessage: _messageFor(error),
+      );
+    }
+  }
+
+  Future<void> _loadMoreNameSearch() async {
+    final cursor = _nameSearchLastDocument;
+    if (cursor == null ||
+        !_hasMoreNameSearchResults ||
+        state.isLoadingMore ||
+        _isDisposed) {
+      return;
+    }
+
+    final generation = _nameSearchGeneration;
+    state = state.copyWith(isLoadingMore: true, clearErrorMessage: true);
+    try {
+      final page = await ref
+          .read(customerRepositoryProvider)
+          .searchCustomersByNamePrefix(
+            prefix: _nameSearchPrefix,
+            startAfterDocument: cursor,
+            limitCount: FirestorePageSize.value,
+          );
+      if (_isDisposed || generation != _nameSearchGeneration) return;
+
+      _appendNameSearchCustomers(page.customers);
+      if (page.lastDocument != null) {
+        _nameSearchLastDocument = page.lastDocument;
+      }
+      _hasMoreNameSearchResults =
+          page.customers.length >= FirestorePageSize.value;
+      state = state.copyWith(
+        nameSearchResults: _nameSearchCustomers,
+        isFromCache: page.isFromCache,
+        hasMoreNameSearchResults: _hasMoreNameSearchResults,
+        isLoadingMore: false,
+        clearErrorMessage: true,
+      );
+    } catch (error) {
+      if (_isDisposed || generation != _nameSearchGeneration) return;
+      state = state.copyWith(
+        isLoadingMore: false,
+        errorMessage: _messageFor(error),
+      );
+    }
+  }
+
   void _appendOlderCustomers(List<Customer> customers) {
     final existingIds = _olderCustomers.map((customer) => customer.id).toSet();
     for (final customer in customers) {
       if (existingIds.add(customer.id)) _olderCustomers.add(customer);
+    }
+  }
+
+  void _appendNameSearchCustomers(List<Customer> customers) {
+    final existingIds = _nameSearchCustomers
+        .map((customer) => customer.id)
+        .toSet();
+    for (final customer in customers) {
+      if (existingIds.add(customer.id)) _nameSearchCustomers.add(customer);
     }
   }
 
@@ -244,11 +391,16 @@ class CustomersViewModel extends Notifier<CustomersState> {
 
   void _resetPagination() {
     _pageGeneration++;
+    _nameSearchGeneration++;
     _firstPageCustomers = const [];
     _olderCustomers = [];
+    _nameSearchCustomers = [];
     _firstPageIds = null;
     _lastDocument = null;
+    _nameSearchLastDocument = null;
+    _nameSearchPrefix = '';
     _hasMore = true;
+    _hasMoreNameSearchResults = false;
   }
 
   String _messageFor(Object error) {
