@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'orders_data_source.dart';
@@ -13,4 +14,14 @@ class OrdersRepository {
 
   Stream<OrderQuerySnapshot> watchOrders({required int limitCount}) =>
       _dataSource.watchOrders(limitCount: limitCount);
+
+  Future<OrderQuerySnapshot> searchOrdersByCustomerNamePrefix({
+    required String prefix,
+    DocumentSnapshot<Map<String, dynamic>>? startAfterDocument,
+    required int limitCount,
+  }) => _dataSource.searchOrdersByCustomerNamePrefix(
+    prefix: prefix,
+    startAfterDocument: startAfterDocument,
+    limitCount: limitCount,
+  );
 }

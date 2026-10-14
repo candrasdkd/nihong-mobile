@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,7 @@ import '../../../../core/widgets/app_loading_view.dart';
 import '../../../../core/widgets/load_more_tile.dart';
 import '../../data/models/order_doc.dart';
 import '../../data/orders_data_source.dart';
+import '../../data/orders_repository.dart';
 import '../../domain/order_calculations.dart';
 import '../order_formatters.dart';
 import '../providers/orders_view_model.dart';
@@ -36,9 +39,19 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   bool _isLoadingMore = false;
   OrderQuerySnapshot? _lastSnapshot;
   String? _loadMoreError;
+  Timer? _nameSearchTimer;
+  List<OrderDoc> _globalNameSearchOrders = [];
+  DocumentSnapshot<Map<String, dynamic>>? _nameSearchLastDocument;
+  String _nameSearchPrefix = '';
+  bool _isSearchingNames = false;
+  bool _isLoadingMoreNames = false;
+  bool _hasMoreNameSearchResults = false;
+  String? _nameSearchError;
+  int _nameSearchGeneration = 0;
 
   @override
   void dispose() {
+    _nameSearchTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -77,11 +90,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: TextField(
                 controller: _searchController,
-                onChanged: (_) => setState(() {}),
+                onChanged: _onSearchChanged,
                 textInputAction: TextInputAction.search,
                 style: const TextStyle(fontSize: 16),
                 decoration: InputDecoration(
-                  hintText: 'Cari nomor, pelanggan, atau barang',
                   prefixIcon: const Icon(Icons.search),
                   suffixIcon: _searchController.text.isEmpty
                       ? null
@@ -89,7 +101,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                           tooltip: 'Hapus pencarian',
                           onPressed: () {
                             _searchController.clear();
-                            setState(() {});
+                            _onSearchChanged('');
                           },
                           icon: const Icon(Icons.close),
                         ),
@@ -159,12 +171,22 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     required bool isLoadingMore,
     String? loadMoreError,
   }) {
-    final hasMore =
+    final query = _searchController.text.trim().toLowerCase();
+    final hasMoreLoadedOrders =
         snapshot.orders.length >= _limitCount ||
         isLoadingMore ||
         loadMoreError != null;
-    final query = _searchController.text.trim().toLowerCase();
-    final filteredOrders = snapshot.orders
+    final hasMoreNameResults =
+        _isSearchingNames ||
+        _isLoadingMoreNames ||
+        _hasMoreNameSearchResults ||
+        _nameSearchError != null;
+    final hasMore = query.isEmpty ? hasMoreLoadedOrders : hasMoreNameResults;
+    final searchError = _nameSearchError ?? loadMoreError;
+    final isAnyLoadingMore =
+        isLoadingMore || _isSearchingNames || _isLoadingMoreNames;
+
+    final filteredLoadedOrders = snapshot.orders
         .where((order) {
           if (_selectedStatus != null &&
               order.displayStatus != _selectedStatus) {
@@ -172,21 +194,22 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           }
           if (query.isEmpty) return true;
 
-          final searchableValues = [
-            order.no,
-            order.namaPelanggan,
-            order.namaBarang,
-            order.kategori,
-            order.catatan,
-            order.displayStatus,
-          ];
-          return searchableValues.any(
-            (value) => value?.toLowerCase().contains(query) ?? false,
-          );
+          return order.namaPelanggan.toLowerCase().contains(query);
         })
         .toList(growable: false);
+    final matchingOrdersById = <String, OrderDoc>{
+      for (final order in filteredLoadedOrders) order.id: order,
+    };
+    if (query.isNotEmpty) {
+      for (final order in _globalNameSearchOrders) {
+        if (_selectedStatus == null || order.displayStatus == _selectedStatus) {
+          matchingOrdersById.putIfAbsent(order.id, () => order);
+        }
+      }
+    }
+    final filteredOrders = matchingOrdersById.values.toList(growable: false);
 
-    if (snapshot.orders.isEmpty) {
+    if (snapshot.orders.isEmpty && query.isEmpty) {
       return Column(
         children: [
           if (snapshot.isFromCache) const _CacheNotice(),
@@ -199,33 +222,38 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
       return Column(
         children: [
           if (snapshot.isFromCache) const _CacheNotice(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '0 hasil • ${snapshot.orders.length} data dimuat',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+          if (_isSearchingNames)
+            const Expanded(child: Center(child: CircularProgressIndicator()))
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '0 hasil • ${snapshot.orders.length} data dimuat',
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
-          ),
-          Expanded(
-            child: ListView(
-              children: [
-                const SizedBox(height: 220, child: _NoMatchingOrders()),
-                if (hasMore)
-                  LoadMoreTile(
-                    onPressed: () => _loadMore(snapshot),
-                    isLoading: isLoadingMore,
-                    errorMessage: loadMoreError,
-                  ),
-              ],
+          if (!_isSearchingNames)
+            Expanded(
+              child: ListView(
+                children: [
+                  const SizedBox(height: 220, child: _NoMatchingOrders()),
+                  if (hasMore)
+                    LoadMoreTile(
+                      onPressed: () => _loadMoreForCurrentQuery(snapshot),
+                      isLoading: isAnyLoadingMore,
+                      errorMessage: searchError,
+                      label: _loadMoreLabel(query),
+                    ),
+                ],
+              ),
             ),
-          ),
         ],
       );
     }
@@ -238,7 +266,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '${filteredOrders.length} hasil • ${snapshot.orders.length} data dimuat',
+              query.isEmpty
+                  ? '${filteredOrders.length} hasil • ${snapshot.orders.length} data dimuat'
+                  : '${filteredOrders.length} hasil • awalan nama dicari di semua pesanan',
               style: const TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 13,
@@ -252,7 +282,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             onNotification: (notification) {
               if (notification.metrics.pixels >=
                   notification.metrics.maxScrollExtent - 240) {
-                _loadMore(snapshot);
+                _loadMoreForCurrentQuery(snapshot);
               }
               return false;
             },
@@ -263,9 +293,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               itemBuilder: (context, index) {
                 if (index >= filteredOrders.length) {
                   return LoadMoreTile(
-                    onPressed: () => _loadMore(snapshot),
-                    isLoading: isLoadingMore,
-                    errorMessage: loadMoreError,
+                    onPressed: () => _loadMoreForCurrentQuery(snapshot),
+                    isLoading: isAnyLoadingMore,
+                    errorMessage: searchError,
+                    label: _loadMoreLabel(query),
                   );
                 }
                 final order = filteredOrders[index];
@@ -289,6 +320,94 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
       builder: (_) => OrderDetailSheet(order: order),
     );
     if (mounted) _reload();
+  }
+
+  void _onSearchChanged(String value) {
+    final prefix = value.trim().toUpperCase();
+    _nameSearchTimer?.cancel();
+    final generation = ++_nameSearchGeneration;
+    _nameSearchPrefix = prefix;
+    _globalNameSearchOrders = [];
+    _nameSearchLastDocument = null;
+    _hasMoreNameSearchResults = false;
+    _isLoadingMoreNames = false;
+    _nameSearchError = null;
+    _isSearchingNames = prefix.isNotEmpty;
+    setState(() {});
+
+    if (prefix.isEmpty) return;
+    _nameSearchTimer = Timer(const Duration(milliseconds: 300), () {
+      unawaited(_fetchNameSearchPage(prefix, generation));
+    });
+  }
+
+  Future<void> _fetchNameSearchPage(String prefix, int generation) async {
+    if (!mounted || generation != _nameSearchGeneration) return;
+    final cursor = _nameSearchLastDocument;
+    setState(() {
+      _isSearchingNames = cursor == null;
+      _isLoadingMoreNames = cursor != null;
+      _nameSearchError = null;
+    });
+
+    try {
+      final page = await ref
+          .read(ordersRepositoryProvider)
+          .searchOrdersByCustomerNamePrefix(
+            prefix: prefix,
+            startAfterDocument: cursor,
+            limitCount: FirestorePageSize.value,
+          );
+      if (!mounted || generation != _nameSearchGeneration) return;
+
+      if (cursor == null) {
+        _globalNameSearchOrders = page.orders;
+      } else {
+        final existingIds = _globalNameSearchOrders
+            .map((order) => order.id)
+            .toSet();
+        for (final order in page.orders) {
+          if (existingIds.add(order.id)) _globalNameSearchOrders.add(order);
+        }
+      }
+      _nameSearchLastDocument = page.lastDocument;
+      _hasMoreNameSearchResults = page.orders.length >= FirestorePageSize.value;
+      setState(() {
+        _isSearchingNames = false;
+        _isLoadingMoreNames = false;
+      });
+    } catch (error) {
+      if (!mounted || generation != _nameSearchGeneration) return;
+      setState(() {
+        _isSearchingNames = false;
+        _isLoadingMoreNames = false;
+        _nameSearchError = _errorMessage(error);
+      });
+    }
+  }
+
+  void _loadMoreForCurrentQuery(OrderQuerySnapshot snapshot) {
+    if (_searchController.text.trim().isEmpty) {
+      _loadMore(snapshot);
+      return;
+    }
+    if (_isSearchingNames || _isLoadingMoreNames) return;
+
+    if (_hasMoreNameSearchResults ||
+        (_nameSearchError != null && _nameSearchLastDocument == null)) {
+      unawaited(_fetchNameSearchPage(_nameSearchPrefix, _nameSearchGeneration));
+    }
+  }
+
+  String _loadMoreLabel(String query) {
+    if (query.isEmpty) return 'Muat pesanan lainnya';
+    if (_isSearchingNames ||
+        _isLoadingMoreNames ||
+        _hasMoreNameSearchResults ||
+        (_nameSearchError != null && _nameSearchLastDocument == null)) {
+      return 'Muat hasil nama berikutnya';
+    }
+    return 'Muat pesanan lainnya';
   }
 
   void _loadMore([OrderQuerySnapshot? currentSnapshot]) {

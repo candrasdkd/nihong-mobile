@@ -159,7 +159,7 @@ class _LoginHero extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Container(
+                    Container(  
                       width: 44,
                       height: 44,
                       decoration: BoxDecoration(
