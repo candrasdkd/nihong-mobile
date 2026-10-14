@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../data/models/pre_order.dart';
 import '../../data/pre_order_data_source.dart';
 import '../../data/pre_order_repository.dart';
@@ -16,6 +17,8 @@ class PreOrdersState {
     this.query = '',
     this.statusFilter = 'Semua',
     this.isFromCache = false,
+    this.limitCount = FirestorePageSize.value,
+    this.isLoadingMore = false,
     this.errorMessage,
   });
 
@@ -24,9 +27,13 @@ class PreOrdersState {
   final String query;
   final String statusFilter;
   final bool isFromCache;
+  final int limitCount;
+  final bool isLoadingMore;
   final String? errorMessage;
 
   bool get isLoading => status == PreOrdersStatus.loading;
+
+  bool get hasMore => isLoadingMore || preOrders.length >= limitCount;
 
   List<PreOrder> get filteredPreOrders {
     final normalizedQuery = query.trim().toLowerCase();
@@ -58,6 +65,8 @@ class PreOrdersState {
     String? query,
     String? statusFilter,
     bool? isFromCache,
+    int? limitCount,
+    bool? isLoadingMore,
     String? errorMessage,
     bool clearErrorMessage = false,
   }) => PreOrdersState(
@@ -66,6 +75,8 @@ class PreOrdersState {
     query: query ?? this.query,
     statusFilter: statusFilter ?? this.statusFilter,
     isFromCache: isFromCache ?? this.isFromCache,
+    limitCount: limitCount ?? this.limitCount,
+    isLoadingMore: isLoadingMore ?? this.isLoadingMore,
     errorMessage: clearErrorMessage ? null : errorMessage ?? this.errorMessage,
   );
 }
@@ -84,7 +95,7 @@ class PreOrdersViewModel extends Notifier<PreOrdersState> {
   PreOrdersState build() {
     final repository = ref.watch(preOrderRepositoryProvider);
     _isDisposed = false;
-    _subscribe(repository);
+    _subscribe(repository, limitCount: FirestorePageSize.value);
     ref.onDispose(() {
       _isDisposed = true;
       _generation++;
@@ -103,7 +114,23 @@ class PreOrdersViewModel extends Notifier<PreOrdersState> {
       status: PreOrdersStatus.loading,
       clearErrorMessage: true,
     );
-    _subscribe(ref.read(preOrderRepositoryProvider));
+    _subscribe(
+      ref.read(preOrderRepositoryProvider),
+      limitCount: state.limitCount,
+    );
+  }
+
+  void loadMore() {
+    if (!state.hasMore || state.isLoadingMore) return;
+    state = state.copyWith(
+      limitCount: state.limitCount + FirestorePageSize.value,
+      isLoadingMore: true,
+      clearErrorMessage: true,
+    );
+    _subscribe(
+      ref.read(preOrderRepositoryProvider),
+      limitCount: state.limitCount,
+    );
   }
 
   Future<String?> savePreOrder(PreOrder preOrder, {String? existingId}) async {
@@ -155,27 +182,35 @@ class PreOrdersViewModel extends Notifier<PreOrdersState> {
       .read(preOrderRepositoryProvider)
       .convertPreOrderToOrder(id, orderDate: _todayYmd());
 
-  void _subscribe(PreOrderRepository repository) {
+  void _subscribe(PreOrderRepository repository, {required int limitCount}) {
     final generation = ++_generation;
     unawaited(_subscription?.cancel());
-    _subscription = repository.watchPreOrders().listen(
-      (snapshot) {
-        if (_isDisposed || generation != _generation) return;
-        state = state.copyWith(
-          status: PreOrdersStatus.data,
-          preOrders: snapshot.preOrders,
-          isFromCache: snapshot.isFromCache,
-          clearErrorMessage: true,
+    _subscription = repository
+        .watchPreOrders(limitCount: limitCount)
+        .listen(
+          (snapshot) {
+            if (_isDisposed || generation != _generation) return;
+            state = state.copyWith(
+              status: PreOrdersStatus.data,
+              preOrders: snapshot.preOrders,
+              isFromCache: snapshot.isFromCache,
+              isLoadingMore: false,
+              clearErrorMessage: true,
+            );
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (_isDisposed || generation != _generation) return;
+            final hadItems = state.preOrders.isNotEmpty;
+            state = state.copyWith(
+              status: hadItems ? PreOrdersStatus.data : PreOrdersStatus.error,
+              limitCount: state.isLoadingMore
+                  ? state.limitCount - FirestorePageSize.value
+                  : null,
+              isLoadingMore: false,
+              errorMessage: _messageFor(error),
+            );
+          },
         );
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        if (_isDisposed || generation != _generation) return;
-        state = state.copyWith(
-          status: PreOrdersStatus.error,
-          errorMessage: _messageFor(error),
-        );
-      },
-    );
   }
 
   String _todayYmd() {

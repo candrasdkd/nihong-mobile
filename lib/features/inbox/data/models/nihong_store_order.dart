@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../core/firestore/firestore_mapper.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 
 class NihongStoreOrder {
   const NihongStoreOrder({
@@ -30,7 +31,7 @@ class NihongStoreOrder {
   });
 
   static const collectionName = 'nihongstore_orders';
-  static const pageSize = 50;
+  static const pageSize = FirestorePageSize.value;
 
   final String id;
   final String no;

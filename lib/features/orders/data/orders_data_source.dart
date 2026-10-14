@@ -11,7 +11,7 @@ class OrderQuerySnapshot {
 }
 
 abstract interface class OrdersDataSource {
-  Stream<OrderQuerySnapshot> watchOrders();
+  Stream<OrderQuerySnapshot> watchOrders({required int limitCount});
 }
 
 final ordersDataSourceProvider = Provider<OrdersDataSource>(
@@ -24,14 +24,16 @@ class FirestoreOrdersDataSource implements OrdersDataSource {
   final FirebaseFirestore _firestore;
 
   @override
-  Stream<OrderQuerySnapshot> watchOrders() => _firestore
-      .collection(OrderDoc.collectionName)
-      .orderBy('tanggal', descending: true)
-      .snapshots(includeMetadataChanges: true)
-      .map(
-        (snapshot) => OrderQuerySnapshot(
-          orders: snapshot.docs.map(OrderDoc.fromFirestore).toList(),
-          isFromCache: snapshot.metadata.isFromCache,
-        ),
-      );
+  Stream<OrderQuerySnapshot> watchOrders({required int limitCount}) =>
+      _firestore
+          .collection(OrderDoc.collectionName)
+          .orderBy('tanggal', descending: true)
+          .limit(limitCount)
+          .snapshots(includeMetadataChanges: true)
+          .map(
+            (snapshot) => OrderQuerySnapshot(
+              orders: snapshot.docs.map(OrderDoc.fromFirestore).toList(),
+              isFromCache: snapshot.metadata.isFromCache,
+            ),
+          );
 }

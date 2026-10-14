@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
-  static const navy = Color(0xFF0B2545);
-  static const navyDark = Color(0xFF071B33);
-  static const navyLight = Color(0xFF154574);
-  static const orange = Color(0xFFF26522);
-  static const orangeLight = Color(0xFFFF8A4C);
+  static const navy = Color(0xFF012E6C);
+  static const navyDark = Color(0xFF002453);
+  static const navyLight = Color(0xFF174A83);
+  static const orange = Color(0xFFF7931E);
+  static const orangeLight = Color(0xFFFFAD4A);
   static const background = Color(0xFFF4F6F8);
   static const card = Color(0xFFFFFEFC);
   static const border = Color(0xFFDDE3EA);

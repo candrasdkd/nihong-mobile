@@ -24,6 +24,7 @@ abstract final class AppTheme {
       textTheme: base.textTheme.apply(
         bodyColor: AppColors.text,
         displayColor: AppColors.navyDark,
+        fontFamilyFallback: const ['NotoSansJP'],
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.background,

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../../orders/domain/order_calculations.dart';
 import '../../../orders/presentation/providers/orders_view_model.dart';
@@ -15,7 +16,9 @@ class DashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final today = DateFormat('EEEE, d MMMM y', 'id_ID').format(DateTime.now());
-    final ordersAsync = ref.watch(ordersStreamProvider);
+    final ordersAsync = ref.watch(
+      ordersStreamProvider(FirestorePageSize.value),
+    );
     final orderSnapshot = ordersAsync.asData?.value;
     final preOrdersState = ref.watch(preOrdersViewModelProvider);
     final activeOrders = orderSnapshot?.orders
@@ -120,7 +123,7 @@ class DashboardScreen extends ConsumerWidget {
             children: [
               Expanded(
                 child: _SummaryCard(
-                  label: 'Pesanan aktif',
+                  label: 'Pesanan aktif terbaru',
                   value: _countLabel(
                     activeOrders,
                     isLoading: ordersAsync.isLoading,
@@ -129,7 +132,7 @@ class DashboardScreen extends ConsumerWidget {
                     activeOrders,
                     isLoading: ordersAsync.isLoading,
                     hasError: ordersAsync.hasError,
-                    noun: 'belum selesai',
+                    noun: 'dari 15 pesanan terbaru',
                   ),
                   icon: Icons.receipt_long_outlined,
                 ),
@@ -137,7 +140,7 @@ class DashboardScreen extends ConsumerWidget {
               SizedBox(width: 12),
               Expanded(
                 child: _SummaryCard(
-                  label: 'Booking pending',
+                  label: 'Booking pending terbaru',
                   value: _countLabel(
                     pendingBookings,
                     isLoading: preOrdersState.isLoading,
@@ -146,7 +149,7 @@ class DashboardScreen extends ConsumerWidget {
                     pendingBookings,
                     isLoading: preOrdersState.isLoading,
                     hasError: preOrdersState.status == PreOrdersStatus.error,
-                    noun: 'menunggu proses',
+                    noun: 'dari 15 booking terbaru',
                   ),
                   icon: Icons.inventory_2_outlined,
                 ),

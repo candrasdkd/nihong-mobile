@@ -26,7 +26,7 @@ class PreOrderConversionResult {
 }
 
 abstract interface class PreOrderDataSource {
-  Stream<PreOrderQuerySnapshot> watchPreOrders();
+  Stream<PreOrderQuerySnapshot> watchPreOrders({required int limitCount});
 
   Future<String> createPreOrder(PreOrder preOrder);
 
@@ -64,16 +64,18 @@ class FirestorePreOrderDataSource implements PreOrderDataSource {
   final NihongStoreAuthRepository _storeAuth;
 
   @override
-  Stream<PreOrderQuerySnapshot> watchPreOrders() => _firestore
-      .collection(PreOrder.collectionName)
-      .orderBy('createdAt', descending: true)
-      .snapshots(includeMetadataChanges: true)
-      .map(
-        (snapshot) => PreOrderQuerySnapshot(
-          preOrders: snapshot.docs.map(PreOrder.fromFirestore).toList(),
-          isFromCache: snapshot.metadata.isFromCache,
-        ),
-      );
+  Stream<PreOrderQuerySnapshot> watchPreOrders({required int limitCount}) =>
+      _firestore
+          .collection(PreOrder.collectionName)
+          .orderBy('createdAt', descending: true)
+          .limit(limitCount)
+          .snapshots(includeMetadataChanges: true)
+          .map(
+            (snapshot) => PreOrderQuerySnapshot(
+              preOrders: snapshot.docs.map(PreOrder.fromFirestore).toList(),
+              isFromCache: snapshot.metadata.isFromCache,
+            ),
+          );
 
   @override
   Future<String> createPreOrder(PreOrder preOrder) async {

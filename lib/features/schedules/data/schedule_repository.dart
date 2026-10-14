@@ -12,10 +12,13 @@ final scheduleDocumentProvider =
       (ref, id) => ref.watch(scheduleRepositoryProvider).watchSchedule(id),
     );
 
-final schedulePreOrdersProvider =
-    StreamProvider.family<SchedulePreOrderQuerySnapshot, String>(
-      (ref, scheduleId) =>
-          ref.watch(scheduleRepositoryProvider).watchPreOrders(scheduleId),
+typedef SchedulePreOrdersRequest = ({String scheduleId, int limitCount});
+
+final schedulePreOrdersProvider = StreamProvider.autoDispose
+    .family<SchedulePreOrderQuerySnapshot, SchedulePreOrdersRequest>(
+      (ref, request) => ref
+          .watch(scheduleRepositoryProvider)
+          .watchPreOrders(request.scheduleId, limitCount: request.limitCount),
     );
 
 class ScheduleRepository {
@@ -23,17 +26,21 @@ class ScheduleRepository {
 
   final ScheduleDataSource _dataSource;
 
-  Stream<DepartureScheduleQuerySnapshot> watchSchedules() =>
-      _dataSource.watchSchedules();
+  Stream<DepartureScheduleQuerySnapshot> watchSchedules({
+    required int limitCount,
+  }) => _dataSource.watchSchedules(limitCount: limitCount);
 
-  Stream<ScheduleJastiperQuerySnapshot> watchJastipers() =>
-      _dataSource.watchJastipers();
+  Stream<ScheduleJastiperQuerySnapshot> watchJastipers({
+    required int limitCount,
+  }) => _dataSource.watchJastipers(limitCount: limitCount);
 
   Stream<DepartureScheduleDocumentSnapshot> watchSchedule(String id) =>
       _dataSource.watchSchedule(id);
 
-  Stream<SchedulePreOrderQuerySnapshot> watchPreOrders(String scheduleId) =>
-      _dataSource.watchPreOrders(scheduleId);
+  Stream<SchedulePreOrderQuerySnapshot> watchPreOrders(
+    String scheduleId, {
+    required int limitCount,
+  }) => _dataSource.watchPreOrders(scheduleId, limitCount: limitCount);
 
   Future<void> createSchedule(DepartureScheduleDraft draft) =>
       _dataSource.createSchedule(draft);

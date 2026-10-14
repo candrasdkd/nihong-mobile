@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'customer_data_source.dart';
@@ -11,6 +12,15 @@ class CustomerRepository {
 
   final CustomerDataSource _dataSource;
 
-  Stream<CustomerQuerySnapshot> watchCustomers() =>
-      _dataSource.watchCustomers();
+  Stream<CustomerQuerySnapshot> watchFirstCustomers({
+    required int limitCount,
+  }) => _dataSource.watchFirstCustomers(limitCount: limitCount);
+
+  Future<CustomerQuerySnapshot> fetchCustomers({
+    required DocumentSnapshot<Map<String, dynamic>> startAfterDocument,
+    required int limitCount,
+  }) => _dataSource.fetchCustomers(
+    startAfterDocument: startAfterDocument,
+    limitCount: limitCount,
+  );
 }

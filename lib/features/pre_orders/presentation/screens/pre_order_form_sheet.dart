@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/formatting/safe_calendar_date.dart';
 import '../../../customers/data/models/customer.dart';
 import '../../../customers/presentation/providers/customers_view_model.dart';
@@ -9,6 +10,9 @@ import '../../../schedules/data/models/departure_schedule.dart';
 import '../../../schedules/presentation/providers/schedules_view_model.dart';
 import '../../data/models/pre_order.dart';
 import '../providers/pre_orders_view_model.dart';
+
+const _loadMoreSchedulesValue = '__load_more_schedules__';
+const _loadMoreCustomersValue = '__load_more_customers__';
 
 Future<bool?> showPreOrderFormSheet(
   BuildContext context,
@@ -181,6 +185,25 @@ class _PreOrderFormSheetState extends ConsumerState<PreOrderFormSheet> {
         .firstOrNull;
     final isEditing = widget.initial != null;
 
+    if (_scheduleId != null &&
+        schedule == null &&
+        scheduleState.hasMoreSchedules &&
+        !scheduleState.isLoadingMoreSchedules) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(schedulesViewModelProvider.notifier).loadMoreSchedules();
+        }
+      });
+    }
+    if (_customerId != null &&
+        customer == null &&
+        customerState.hasMore &&
+        !customerState.isLoadingMore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.read(customersViewModelProvider.notifier).loadMore();
+      });
+    }
+
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: DraggableScrollableSheet(
@@ -234,25 +257,43 @@ class _PreOrderFormSheetState extends ConsumerState<PreOrderFormSheet> {
                             customerState.errorMessage!,
                       ),
                     DropdownButtonFormField<String>(
+                      key: ValueKey('booking-schedules-${schedules.length}'),
                       initialValue: schedule == null ? null : _scheduleId,
                       decoration: const InputDecoration(
                         labelText: 'Jadwal keberangkatan *',
                         prefixIcon: Icon(Icons.flight_takeoff_outlined),
                       ),
-                      items: schedules
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item.id,
-                              child: Text(
-                                '${item.rute} • ${SafeCalendarDate.formatFullIndonesian(item.tanggalBerangkat)}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                      items: [
+                        ...schedules.map(
+                          (item) => DropdownMenuItem(
+                            value: item.id,
+                            child: Text(
+                              '${item.rute} • ${SafeCalendarDate.formatFullIndonesian(item.tanggalBerangkat)}',
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          )
-                          .toList(),
+                          ),
+                        ),
+                        if (scheduleState.hasMoreSchedules)
+                          DropdownMenuItem(
+                            value: _loadMoreSchedulesValue,
+                            child: Text(
+                              scheduleState.isLoadingMoreSchedules
+                                  ? 'Memuat jadwal…'
+                                  : 'Muat ${FirestorePageSize.value} jadwal lainnya…',
+                            ),
+                          ),
+                      ],
                       onChanged: _saving || _hasCheckedItems
                           ? null
-                          : (value) => setState(() => _scheduleId = value),
+                          : (value) {
+                              if (value == _loadMoreSchedulesValue) {
+                                ref
+                                    .read(schedulesViewModelProvider.notifier)
+                                    .loadMoreSchedules();
+                                return;
+                              }
+                              setState(() => _scheduleId = value);
+                            },
                       validator: (value) =>
                           value == null ? 'Pilih jadwal.' : null,
                     ),
@@ -266,25 +307,43 @@ class _PreOrderFormSheetState extends ConsumerState<PreOrderFormSheet> {
                       ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      key: ValueKey('booking-customers-${customers.length}'),
                       initialValue: customer == null ? null : _customerId,
                       decoration: const InputDecoration(
                         labelText: 'Pelanggan *',
                         prefixIcon: Icon(Icons.person_outline),
                       ),
-                      items: customers
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item.id,
-                              child: Text(
-                                item.nama,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                      items: [
+                        ...customers.map(
+                          (item) => DropdownMenuItem(
+                            value: item.id,
+                            child: Text(
+                              item.nama,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          )
-                          .toList(),
+                          ),
+                        ),
+                        if (customerState.hasMore)
+                          DropdownMenuItem(
+                            value: _loadMoreCustomersValue,
+                            child: Text(
+                              customerState.isLoadingMore
+                                  ? 'Memuat pelanggan…'
+                                  : 'Muat ${FirestorePageSize.value} pelanggan lainnya…',
+                            ),
+                          ),
+                      ],
                       onChanged: _saving
                           ? null
-                          : (value) => setState(() => _customerId = value),
+                          : (value) {
+                              if (value == _loadMoreCustomersValue) {
+                                ref
+                                    .read(customersViewModelProvider.notifier)
+                                    .loadMore();
+                                return;
+                              }
+                              setState(() => _customerId = value);
+                            },
                       validator: (value) =>
                           value == null ? 'Pilih pelanggan.' : null,
                     ),

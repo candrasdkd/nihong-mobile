@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/formatting/safe_calendar_date.dart';
 import '../../../../core/widgets/app_loading_view.dart';
+import '../../../../core/widgets/load_more_tile.dart';
 import '../../data/models/order_doc.dart';
 import '../../data/orders_data_source.dart';
 import '../../domain/order_calculations.dart';
@@ -30,6 +32,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
 
   final _searchController = TextEditingController();
   String? _selectedStatus;
+  int _limitCount = FirestorePageSize.value;
+  bool _isLoadingMore = false;
+  OrderQuerySnapshot? _lastSnapshot;
+  String? _loadMoreError;
 
   @override
   void dispose() {
@@ -39,10 +45,31 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ordersAsync = ref.watch(ordersStreamProvider);
+    final ordersProvider = ordersStreamProvider(_limitCount);
+    final ordersAsync = ref.watch(ordersProvider);
+    ref.listen(ordersProvider, (previous, next) {
+      if (next.hasValue) {
+        _lastSnapshot = next.value;
+        _isLoadingMore = false;
+      } else if (next.hasError && _isLoadingMore) {
+        _isLoadingMore = false;
+        _loadMoreError = _errorMessage(next.error!);
+        _limitCount -= FirestorePageSize.value;
+      }
+    });
+    final snapshot = ordersAsync.asData?.value ?? _lastSnapshot;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Pesanan')),
+      appBar: AppBar(
+        title: const Text('Pesanan'),
+        actions: [
+          IconButton(
+            tooltip: 'Muat ulang pesanan',
+            onPressed: _reload,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -104,14 +131,22 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               ),
             ),
             Expanded(
-              child: ordersAsync.when(
-                loading: () => const AppLoadingView(message: 'Memuat pesanan…'),
-                error: (error, _) => _OrdersLoadError(
-                  message: _errorMessage(error),
-                  onRetry: () => ref.invalidate(ordersStreamProvider),
-                ),
-                data: _buildOrders,
-              ),
+              child: snapshot == null
+                  ? ordersAsync.hasError
+                        ? _OrdersLoadError(
+                            message: _errorMessage(ordersAsync.error!),
+                            onRetry: _reload,
+                          )
+                        : const AppLoadingView(message: 'Memuat pesanan…')
+                  : _buildOrders(
+                      snapshot,
+                      isLoadingMore: _isLoadingMore && ordersAsync.isLoading,
+                      loadMoreError:
+                          _loadMoreError ??
+                          (ordersAsync.hasError
+                              ? _errorMessage(ordersAsync.error!)
+                              : null),
+                    ),
             ),
           ],
         ),
@@ -119,7 +154,15 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     );
   }
 
-  Widget _buildOrders(OrderQuerySnapshot snapshot) {
+  Widget _buildOrders(
+    OrderQuerySnapshot snapshot, {
+    required bool isLoadingMore,
+    String? loadMoreError,
+  }) {
+    final hasMore =
+        snapshot.orders.length >= _limitCount ||
+        isLoadingMore ||
+        loadMoreError != null;
     final query = _searchController.text.trim().toLowerCase();
     final filteredOrders = snapshot.orders
         .where((order) {
@@ -161,7 +204,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                '0 dari ${snapshot.orders.length} pesanan',
+                '0 hasil • ${snapshot.orders.length} data dimuat',
                 style: const TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 13,
@@ -170,7 +213,19 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               ),
             ),
           ),
-          const Expanded(child: _NoMatchingOrders()),
+          Expanded(
+            child: ListView(
+              children: [
+                const SizedBox(height: 220, child: _NoMatchingOrders()),
+                if (hasMore)
+                  LoadMoreTile(
+                    onPressed: () => _loadMore(snapshot),
+                    isLoading: isLoadingMore,
+                    errorMessage: loadMoreError,
+                  ),
+              ],
+            ),
+          ),
         ],
       );
     }
@@ -183,7 +238,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '${filteredOrders.length} dari ${snapshot.orders.length} pesanan',
+              '${filteredOrders.length} hasil • ${snapshot.orders.length} data dimuat',
               style: const TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 13,
@@ -193,26 +248,71 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
           ),
         ),
         Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            itemCount: filteredOrders.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final order = filteredOrders[index];
-              return _OrderCard(
-                order: order,
-                onTap: () => showModalBottomSheet<void>(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) => OrderDetailSheet(order: order),
-                ),
-              );
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (notification.metrics.pixels >=
+                  notification.metrics.maxScrollExtent - 240) {
+                _loadMore(snapshot);
+              }
+              return false;
             },
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              itemCount: filteredOrders.length + (hasMore ? 1 : 0),
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                if (index >= filteredOrders.length) {
+                  return LoadMoreTile(
+                    onPressed: () => _loadMore(snapshot),
+                    isLoading: isLoadingMore,
+                    errorMessage: loadMoreError,
+                  );
+                }
+                final order = filteredOrders[index];
+                return _OrderCard(
+                  order: order,
+                  onTap: () => _showOrderDetails(order),
+                );
+              },
+            ),
           ),
         ),
       ],
     );
+  }
+
+  Future<void> _showOrderDetails(OrderDoc order) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => OrderDetailSheet(order: order),
+    );
+    if (mounted) _reload();
+  }
+
+  void _loadMore([OrderQuerySnapshot? currentSnapshot]) {
+    final snapshot = currentSnapshot ?? _lastSnapshot;
+    if (_isLoadingMore ||
+        snapshot == null ||
+        snapshot.orders.length < _limitCount) {
+      return;
+    }
+    setState(() {
+      _isLoadingMore = true;
+      _loadMoreError = null;
+      _limitCount += FirestorePageSize.value;
+    });
+  }
+
+  void _reload() {
+    final limitCount = _limitCount;
+    setState(() {
+      _lastSnapshot = null;
+      _isLoadingMore = false;
+      _loadMoreError = null;
+    });
+    ref.invalidate(ordersStreamProvider(limitCount));
   }
 
   static String _errorMessage(Object error) {

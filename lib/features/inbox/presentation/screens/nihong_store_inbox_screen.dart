@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/widgets/app_loading_view.dart';
+import '../../../../core/widgets/load_more_tile.dart';
 import '../../data/nihong_store_inbox_data_source.dart';
 import '../../data/models/nihong_store_order.dart';
 import '../nihong_store_order_formatters.dart';
@@ -32,6 +34,9 @@ class _NihongStoreInboxScreenState
   final _searchController = TextEditingController();
   String _selectedStatus = 'inbox';
   int _limitCount = NihongStoreOrder.pageSize;
+  bool _isLoadingMore = false;
+  NihongStoreInboxSnapshot? _lastSnapshot;
+  String? _loadMoreError;
 
   @override
   void dispose() {
@@ -41,8 +46,19 @@ class _NihongStoreInboxScreenState
 
   @override
   Widget build(BuildContext context) {
-    final ordersAsync = ref.watch(nihongStoreInboxStreamProvider(_limitCount));
-    final orderSnapshot = ordersAsync.asData?.value;
+    final ordersProvider = nihongStoreInboxStreamProvider(_limitCount);
+    final ordersAsync = ref.watch(ordersProvider);
+    ref.listen(ordersProvider, (previous, next) {
+      if (next.hasValue) {
+        _lastSnapshot = next.value;
+        _isLoadingMore = false;
+      } else if (next.hasError && _isLoadingMore) {
+        _isLoadingMore = false;
+        _loadMoreError = _errorMessage(next.error!);
+        _limitCount -= NihongStoreOrder.pageSize;
+      }
+    });
+    final orderSnapshot = ordersAsync.asData?.value ?? _lastSnapshot;
     final orders = orderSnapshot?.orders ?? const <NihongStoreOrder>[];
     final statusCounts = {
       for (final status in const ['inbox', 'assigned', 'rejected'])
@@ -124,16 +140,24 @@ class _NihongStoreInboxScreenState
               ),
             ),
             Expanded(
-              child: ordersAsync.when(
-                loading: () => const AppLoadingView(
-                  message: 'Memuat pesanan NihongStore…',
-                ),
-                error: (error, _) => _InboxLoadError(
-                  message: _errorMessage(error),
-                  onRetry: _reload,
-                ),
-                data: _buildOrders,
-              ),
+              child: orderSnapshot == null
+                  ? ordersAsync.hasError
+                        ? _InboxLoadError(
+                            message: _errorMessage(ordersAsync.error!),
+                            onRetry: _reload,
+                          )
+                        : const AppLoadingView(
+                            message: 'Memuat pesanan NihongStore…',
+                          )
+                  : _buildOrders(
+                      orderSnapshot,
+                      isLoadingMore: _isLoadingMore && ordersAsync.isLoading,
+                      loadMoreError:
+                          _loadMoreError ??
+                          (ordersAsync.hasError
+                              ? _errorMessage(ordersAsync.error!)
+                              : null),
+                    ),
             ),
           ],
         ),
@@ -141,9 +165,16 @@ class _NihongStoreInboxScreenState
     );
   }
 
-  Widget _buildOrders(NihongStoreInboxSnapshot snapshot) {
+  Widget _buildOrders(
+    NihongStoreInboxSnapshot snapshot, {
+    required bool isLoadingMore,
+    String? loadMoreError,
+  }) {
     final query = _searchController.text.trim().toLowerCase();
-    final hasMore = snapshot.orders.length >= _limitCount;
+    final hasMore =
+        snapshot.orders.length >= _limitCount ||
+        isLoadingMore ||
+        loadMoreError != null;
     final filtered = snapshot.orders
         .where((order) {
           if (_selectedStatus.isNotEmpty && order.status != _selectedStatus) {
@@ -180,12 +211,28 @@ class _NihongStoreInboxScreenState
         children: [
           if (snapshot.isFromCache) const _CacheNotice(),
           _ResultCount(count: 0, total: snapshot.orders.length),
-          const Expanded(child: _NoMatchingOrders()),
-          if (hasMore)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: _LoadMoreButton(onPressed: _loadMore),
+          Expanded(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (notification.metrics.pixels >=
+                    notification.metrics.maxScrollExtent - 240) {
+                  _loadMore(snapshot);
+                }
+                return false;
+              },
+              child: ListView(
+                children: [
+                  const SizedBox(height: 220, child: _NoMatchingOrders()),
+                  if (hasMore)
+                    LoadMoreTile(
+                      onPressed: () => _loadMore(snapshot),
+                      isLoading: isLoadingMore,
+                      errorMessage: loadMoreError,
+                    ),
+                ],
+              ),
             ),
+          ),
         ],
       );
     }
@@ -195,30 +242,52 @@ class _NihongStoreInboxScreenState
         if (snapshot.isFromCache) const _CacheNotice(),
         _ResultCount(count: filtered.length, total: snapshot.orders.length),
         Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            itemCount: filtered.length + (hasMore ? 1 : 0),
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              if (index >= filtered.length) {
-                return _LoadMoreButton(onPressed: _loadMore);
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (notification.metrics.pixels >=
+                  notification.metrics.maxScrollExtent - 240) {
+                _loadMore(snapshot);
               }
-              final order = filtered[index];
-              return _NihongStoreOrderCard(
-                order: order,
-                onAssign: order.status == 'inbox'
-                    ? () => _assignOrder(order)
-                    : null,
-                onTap: () => _showOrderDetails(order),
-              );
+              return false;
             },
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              itemCount: filtered.length + (hasMore ? 1 : 0),
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                if (index >= filtered.length) {
+                  return LoadMoreTile(
+                    onPressed: () => _loadMore(snapshot),
+                    isLoading: isLoadingMore,
+                    errorMessage: loadMoreError,
+                    label: 'Muat ${FirestorePageSize.value} pesanan lainnya',
+                  );
+                }
+                final order = filtered[index];
+                return _NihongStoreOrderCard(
+                  order: order,
+                  onAssign: order.status == 'inbox'
+                      ? () => _assignOrder(order)
+                      : null,
+                  onTap: () => _showOrderDetails(order),
+                );
+              },
+            ),
           ),
         ),
       ],
     );
   }
 
-  void _reload() => ref.invalidate(nihongStoreInboxStreamProvider(_limitCount));
+  void _reload() {
+    final limitCount = _limitCount;
+    setState(() {
+      _isLoadingMore = false;
+      _lastSnapshot = null;
+      _loadMoreError = null;
+    });
+    ref.invalidate(nihongStoreInboxStreamProvider(limitCount));
+  }
 
   Future<void> _assignOrder(NihongStoreOrder order) async {
     final assigned = await showModalBottomSheet<bool>(
@@ -248,9 +317,19 @@ class _NihongStoreInboxScreenState
     );
   }
 
-  void _loadMore() => setState(() {
-    _limitCount += NihongStoreOrder.pageSize;
-  });
+  void _loadMore([NihongStoreInboxSnapshot? currentSnapshot]) {
+    final snapshot = currentSnapshot ?? _lastSnapshot;
+    if (_isLoadingMore ||
+        snapshot == null ||
+        snapshot.orders.length < _limitCount) {
+      return;
+    }
+    setState(() {
+      _isLoadingMore = true;
+      _loadMoreError = null;
+      _limitCount += NihongStoreOrder.pageSize;
+    });
+  }
 
   static String _errorMessage(Object error) {
     if (error is FirebaseException) {
@@ -279,21 +358,6 @@ class _InboxStatusFilter {
   final String status;
 }
 
-class _LoadMoreButton extends StatelessWidget {
-  const _LoadMoreButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: const Icon(Icons.expand_more),
-      label: const Text('Muat 50 pesanan lainnya'),
-    ),
-  );
-}
-
 class _ResultCount extends StatelessWidget {
   const _ResultCount({required this.count, required this.total});
 
@@ -306,7 +370,7 @@ class _ResultCount extends StatelessWidget {
     child: Align(
       alignment: Alignment.centerLeft,
       child: Text(
-        '$count dari $total pesanan terbaru',
+        '$count hasil • $total pesanan terbaru dimuat',
         style: const TextStyle(
           color: AppColors.textMuted,
           fontSize: 13,

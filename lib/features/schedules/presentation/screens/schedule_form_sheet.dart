@@ -4,12 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/formatting/safe_calendar_date.dart';
 import '../../data/models/departure_schedule.dart';
 import '../providers/schedules_view_model.dart';
 
 const _scheduleRoutes = ['Indonesia → Jepang', 'Jepang → Indonesia'];
 const _scheduleStatuses = ['Open', 'Closed'];
+const _loadMoreJastipersValue = '__load_more_jastipers__';
 
 Future<bool> showScheduleForm(
   BuildContext context, {
@@ -178,6 +180,16 @@ class _ScheduleFormSheetState extends ConsumerState<ScheduleFormSheet> {
         state.jastipers.any((jastiper) => jastiper.id == _jastiperId)
         ? _jastiperId
         : null;
+    if (_jastiperId != null &&
+        validJastiperId == null &&
+        state.hasMoreJastipers &&
+        !state.isLoadingMoreJastipers) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(schedulesViewModelProvider.notifier).loadMoreJastipers();
+        }
+      });
+    }
 
     return FractionallySizedBox(
       heightFactor: 0.94,
@@ -231,17 +243,34 @@ class _ScheduleFormSheetState extends ConsumerState<ScheduleFormSheet> {
                       isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Jastiper'),
                       hint: const Text('Pilih jastiper'),
-                      items: state.jastipers
-                          .map(
-                            (jastiper) => DropdownMenuItem(
-                              value: jastiper.id,
-                              child: Text(jastiper.nama),
+                      items: [
+                        ...state.jastipers.map(
+                          (jastiper) => DropdownMenuItem(
+                            value: jastiper.id,
+                            child: Text(jastiper.nama),
+                          ),
+                        ),
+                        if (state.hasMoreJastipers)
+                          DropdownMenuItem(
+                            value: _loadMoreJastipersValue,
+                            child: Text(
+                              state.isLoadingMoreJastipers
+                                  ? 'Memuat jastiper…'
+                                  : 'Muat ${FirestorePageSize.value} jastiper lainnya…',
                             ),
-                          )
-                          .toList(growable: false),
+                          ),
+                      ],
                       onChanged: _isSaving
                           ? null
-                          : (value) => setState(() => _jastiperId = value),
+                          : (value) {
+                              if (value == _loadMoreJastipersValue) {
+                                ref
+                                    .read(schedulesViewModelProvider.notifier)
+                                    .loadMoreJastipers();
+                                return;
+                              }
+                              setState(() => _jastiperId = value);
+                            },
                       validator: (value) => value == null
                           ? 'Pilih jastiper terlebih dahulu.'
                           : null,

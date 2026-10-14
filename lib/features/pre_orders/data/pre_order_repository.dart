@@ -12,8 +12,8 @@ class PreOrderRepository {
 
   final PreOrderDataSource _dataSource;
 
-  Stream<PreOrderQuerySnapshot> watchPreOrders() =>
-      _dataSource.watchPreOrders();
+  Stream<PreOrderQuerySnapshot> watchPreOrders({required int limitCount}) =>
+      _dataSource.watchPreOrders(limitCount: limitCount);
 
   Future<String> createPreOrder(PreOrder preOrder) =>
       _dataSource.createPreOrder(preOrder);

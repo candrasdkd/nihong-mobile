@@ -2,9 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/widgets/app_loading_view.dart';
+import '../../../../core/widgets/load_more_tile.dart';
 import '../../data/models/customer.dart';
 import '../providers/customers_view_model.dart';
+
+bool _shouldLoadMoreOnScroll(ScrollNotification notification) {
+  if (notification is! ScrollUpdateNotification ||
+      notification.metrics.maxScrollExtent <= 0) {
+    return false;
+  }
+
+  final maxExtent = notification.metrics.maxScrollExtent;
+  final threshold = maxExtent < 240 ? maxExtent * 0.25 : 240.0;
+  return notification.metrics.pixels >= maxExtent - threshold;
+}
 
 class CustomersScreen extends ConsumerWidget {
   const CustomersScreen({super.key});
@@ -60,7 +73,31 @@ class CustomersScreen extends ConsumerWidget {
                 state.customers.isEmpty)
               const Expanded(child: _EmptyCustomers())
             else if (state.status == CustomersStatus.data && customers.isEmpty)
-              Expanded(child: _NoSearchResults(query: state.query))
+              Expanded(
+                child: state.hasMore
+                    ? NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (_shouldLoadMoreOnScroll(notification)) {
+                            viewModel.loadMore();
+                          }
+                          return false;
+                        },
+                        child: ListView(
+                          children: [
+                            SizedBox(
+                              height: 220,
+                              child: _NoSearchResults(query: state.query),
+                            ),
+                            LoadMoreTile(
+                              onPressed: viewModel.loadMore,
+                              isLoading: state.isLoadingMore,
+                              errorMessage: state.errorMessage,
+                            ),
+                          ],
+                        ),
+                      )
+                    : _NoSearchResults(query: state.query),
+              )
             else
               Expanded(
                 child: Column(
@@ -72,7 +109,7 @@ class CustomersScreen extends ConsumerWidget {
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          '${customers.length} pelanggan',
+                          '${customers.length} cocok • ${state.customers.length} data dimuat',
                           style: const TextStyle(
                             color: AppColors.textMuted,
                             fontSize: 13,
@@ -82,12 +119,30 @@ class CustomersScreen extends ConsumerWidget {
                       ),
                     ),
                     Expanded(
-                      child: ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                        itemCount: customers.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) =>
-                            _CustomerCard(customer: customers[index]),
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (_shouldLoadMoreOnScroll(notification)) {
+                            viewModel.loadMore();
+                          }
+                          return false;
+                        },
+                        child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                          itemCount: customers.length + (state.hasMore ? 1 : 0),
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            if (index >= customers.length) {
+                              return LoadMoreTile(
+                                onPressed: viewModel.loadMore,
+                                isLoading: state.isLoadingMore,
+                                errorMessage: state.errorMessage,
+                                label:
+                                    'Muat ${FirestorePageSize.value} pelanggan lainnya',
+                              );
+                            }
+                            return _CustomerCard(customer: customers[index]);
+                          },
+                        ),
                       ),
                     ),
                   ],

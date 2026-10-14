@@ -11,5 +11,6 @@ class OrdersRepository {
 
   final OrdersDataSource _dataSource;
 
-  Stream<OrderQuerySnapshot> watchOrders() => _dataSource.watchOrders();
+  Stream<OrderQuerySnapshot> watchOrders({required int limitCount}) =>
+      _dataSource.watchOrders(limitCount: limitCount);
 }

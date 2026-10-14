@@ -30,6 +30,8 @@ Beberapa menu masih placeholder: Kas, direktori Jastiper, dan halaman link publi
 | **Cloud Firestore** | Membaca dan menyimpan data pelanggan, pesanan, jadwal, booking, dan inbox. |
 | **intl** dan `flutter_localizations` | Format tanggal/bahasa, terutama nama bulan Bahasa Indonesia. |
 
+Daftar data menggunakan batas awal **15 dokumen**. Saat pengguna scroll ke bagian bawah, aplikasi meminta tambahan 15. Ukuran ini didefinisikan di [firestore_page_size.dart](../lib/core/firestore/firestore_page_size.dart), sedangkan footer pemuatan ada di [load_more_tile.dart](../lib/core/widgets/load_more_tile.dart). Pencarian dan filter daftar bekerja pada data yang sudah dimuat; kalau hasil belum ditemukan, gunakan footer “Muat 15 data lainnya”.
+
 Daftar versi paket ada di [pubspec.yaml](../pubspec.yaml). Syarat Dart project saat ini `^3.12.2`; versi SDK yang terpasang bisa dicek dengan `flutter --version`.
 
 ## 3. Gambaran arsitektur
@@ -203,6 +205,8 @@ Sebelum mengubah field atau nama collection, cari pemakaiannya di aplikasi web j
 | `lib/main.dart` | Titik mulai aplikasi dan inisialisasi Firebase. |
 | `lib/app/` | Root widget dan konfigurasi route. |
 | `lib/core/` | Tema, warna, mapper Firestore, formatter tanggal, widget umum. |
+| `lib/core/firestore/firestore_page_size.dart` | Ukuran batch awal/tambahan daftar: 15 dokumen. |
+| `lib/core/widgets/load_more_tile.dart` | Footer indikator dan tombol muat lagi pada daftar. |
 | `lib/features/auth/` | Login dan state sesi Firebase. |
 | `lib/features/orders/` | Pesanan resmi, perhitungan, layar dan state. |
 | `lib/features/pre_orders/` | Booking, checklist, pembatalan, konversi ke pesanan. |

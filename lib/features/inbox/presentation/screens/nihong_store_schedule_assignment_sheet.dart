@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
+import '../../../../core/widgets/load_more_tile.dart';
 import '../../../../core/formatting/safe_calendar_date.dart';
 import '../../../schedules/data/models/departure_schedule.dart';
 import '../../../schedules/presentation/providers/schedules_view_model.dart';
@@ -83,25 +85,63 @@ class _NihongStoreScheduleAssignmentSheetState
                       onRetry: () =>
                           ref.read(schedulesViewModelProvider.notifier).retry(),
                     )
-                  : schedules.isEmpty
+                  : schedules.isEmpty && !scheduleState.hasMoreSchedules
                   ? const _NoOpenSchedules()
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      itemCount: schedules.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final schedule = schedules[index];
-                        return _ScheduleOption(
-                          schedule: schedule,
-                          totalKg: totalKg,
-                          selected: schedule.id == _selectedScheduleId,
-                          enabled: !_isSaving,
-                          onTap: () => setState(() {
-                            _selectedScheduleId = schedule.id;
-                            _errorMessage = null;
-                          }),
-                        );
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification.metrics.pixels >=
+                            notification.metrics.maxScrollExtent - 240) {
+                          ref
+                              .read(schedulesViewModelProvider.notifier)
+                              .loadMoreSchedules();
+                        }
+                        return false;
                       },
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        itemCount:
+                            schedules.length +
+                            (scheduleState.hasMoreSchedules ? 1 : 0) +
+                            (schedules.isEmpty ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (schedules.isEmpty && index == 0) {
+                            return const Padding(
+                              padding: EdgeInsets.all(20),
+                              child: Center(
+                                child: Text(
+                                  'Belum ada jadwal terbuka pada data yang dimuat.',
+                                ),
+                              ),
+                            );
+                          }
+                          if (index >=
+                              schedules.length + (schedules.isEmpty ? 1 : 0)) {
+                            return LoadMoreTile(
+                              onPressed: () => ref
+                                  .read(schedulesViewModelProvider.notifier)
+                                  .loadMoreSchedules(),
+                              isLoading: scheduleState.isLoadingMoreSchedules,
+                              label:
+                                  'Muat ${FirestorePageSize.value} jadwal lainnya',
+                            );
+                          }
+                          final schedule =
+                              schedules[index - (schedules.isEmpty ? 1 : 0)];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _ScheduleOption(
+                              schedule: schedule,
+                              totalKg: totalKg,
+                              selected: schedule.id == _selectedScheduleId,
+                              enabled: !_isSaving,
+                              onTap: () => setState(() {
+                                _selectedScheduleId = schedule.id;
+                                _errorMessage = null;
+                              }),
+                            ),
+                          );
+                        },
+                      ),
                     ),
             ),
             SafeArea(

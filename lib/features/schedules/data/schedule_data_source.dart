@@ -47,13 +47,20 @@ class SchedulePreOrderQuerySnapshot {
 }
 
 abstract interface class ScheduleDataSource {
-  Stream<DepartureScheduleQuerySnapshot> watchSchedules();
+  Stream<DepartureScheduleQuerySnapshot> watchSchedules({
+    required int limitCount,
+  });
 
-  Stream<ScheduleJastiperQuerySnapshot> watchJastipers();
+  Stream<ScheduleJastiperQuerySnapshot> watchJastipers({
+    required int limitCount,
+  });
 
   Stream<DepartureScheduleDocumentSnapshot> watchSchedule(String id);
 
-  Stream<SchedulePreOrderQuerySnapshot> watchPreOrders(String scheduleId);
+  Stream<SchedulePreOrderQuerySnapshot> watchPreOrders(
+    String scheduleId, {
+    required int limitCount,
+  });
 
   Future<void> createSchedule(DepartureScheduleDraft draft);
 
@@ -70,9 +77,12 @@ class FirestoreScheduleDataSource implements ScheduleDataSource {
   final FirebaseFirestore _firestore;
 
   @override
-  Stream<DepartureScheduleQuerySnapshot> watchSchedules() => _firestore
+  Stream<DepartureScheduleQuerySnapshot> watchSchedules({
+    required int limitCount,
+  }) => _firestore
       .collection(DepartureSchedule.collectionName)
       .orderBy('tanggalBerangkat')
+      .limit(limitCount)
       .snapshots(includeMetadataChanges: true)
       .map(
         (snapshot) => DepartureScheduleQuerySnapshot(
@@ -84,9 +94,12 @@ class FirestoreScheduleDataSource implements ScheduleDataSource {
       );
 
   @override
-  Stream<ScheduleJastiperQuerySnapshot> watchJastipers() => _firestore
+  Stream<ScheduleJastiperQuerySnapshot> watchJastipers({
+    required int limitCount,
+  }) => _firestore
       .collection('jastipers')
       .orderBy('nama')
+      .limit(limitCount)
       .snapshots(includeMetadataChanges: true)
       .map(
         (snapshot) => ScheduleJastiperQuerySnapshot(
@@ -111,17 +124,20 @@ class FirestoreScheduleDataSource implements ScheduleDataSource {
           );
 
   @override
-  Stream<SchedulePreOrderQuerySnapshot> watchPreOrders(String scheduleId) =>
-      _firestore
-          .collection(PreOrder.collectionName)
-          .where('idJadwal', isEqualTo: scheduleId)
-          .snapshots(includeMetadataChanges: true)
-          .map(
-            (snapshot) => SchedulePreOrderQuerySnapshot(
-              preOrders: snapshot.docs.map(PreOrder.fromFirestore).toList(),
-              isFromCache: snapshot.metadata.isFromCache,
-            ),
-          );
+  Stream<SchedulePreOrderQuerySnapshot> watchPreOrders(
+    String scheduleId, {
+    required int limitCount,
+  }) => _firestore
+      .collection(PreOrder.collectionName)
+      .where('idJadwal', isEqualTo: scheduleId)
+      .limit(limitCount)
+      .snapshots(includeMetadataChanges: true)
+      .map(
+        (snapshot) => SchedulePreOrderQuerySnapshot(
+          preOrders: snapshot.docs.map(PreOrder.fromFirestore).toList(),
+          isFromCache: snapshot.metadata.isFromCache,
+        ),
+      );
 
   @override
   Future<void> createSchedule(DepartureScheduleDraft draft) async {

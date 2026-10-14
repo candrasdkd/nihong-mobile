@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/formatting/safe_calendar_date.dart';
 import '../../../../core/widgets/app_loading_view.dart';
+import '../../../../core/widgets/load_more_tile.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../data/models/departure_schedule.dart';
 import '../providers/schedules_view_model.dart';
@@ -123,7 +125,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
                   ),
                   const SizedBox(width: 7),
                   Text(
-                    '${state.openCount} jadwal terbuka',
+                    '${state.openCount} terbuka • ${state.schedules.length} data dimuat',
                     style: const TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 13,
@@ -132,7 +134,7 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
                   ),
                   const Spacer(),
                   Text(
-                    '${schedules.length} ditampilkan',
+                    '${schedules.length} cocok',
                     style: const TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 12,
@@ -165,11 +167,40 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
               )
             else if (schedules.isEmpty)
               Expanded(
-                child: _EmptySchedules(
-                  hasSchedules: state.schedules.isNotEmpty,
-                  statusFilter: state.statusFilter,
-                  query: state.query,
-                ),
+                child: state.hasMoreSchedules
+                    ? NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (notification.metrics.pixels >=
+                              notification.metrics.maxScrollExtent - 240) {
+                            viewModel.loadMoreSchedules();
+                          }
+                          return false;
+                        },
+                        child: ListView(
+                          children: [
+                            SizedBox(
+                              height: 240,
+                              child: _EmptySchedules(
+                                hasSchedules: state.schedules.isNotEmpty,
+                                statusFilter: state.statusFilter,
+                                query: state.query,
+                              ),
+                            ),
+                            LoadMoreTile(
+                              onPressed: viewModel.loadMoreSchedules,
+                              isLoading: state.isLoadingMoreSchedules,
+                              errorMessage: state.scheduleErrorMessage,
+                              label:
+                                  'Muat ${FirestorePageSize.value} jadwal lainnya',
+                            ),
+                          ],
+                        ),
+                      )
+                    : _EmptySchedules(
+                        hasSchedules: state.schedules.isNotEmpty,
+                        statusFilter: state.statusFilter,
+                        query: state.query,
+                      ),
               )
             else
               Expanded(
@@ -178,15 +209,40 @@ class _SchedulesScreenState extends ConsumerState<SchedulesScreen> {
                     if (state.isLoadingSchedules)
                       const LinearProgressIndicator(minHeight: 2),
                     Expanded(
-                      child: ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
-                        itemCount: schedules.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) => _ScheduleCard(
-                          schedule: schedules[index],
-                          onOpen: () =>
-                              context.push('/schedules/${schedules[index].id}'),
-                          onEdit: () => _openForm(schedule: schedules[index]),
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (notification.metrics.pixels >=
+                              notification.metrics.maxScrollExtent - 240) {
+                            viewModel.loadMoreSchedules();
+                          }
+                          return false;
+                        },
+                        child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+                          itemCount:
+                              schedules.length +
+                              (state.hasMoreSchedules ? 1 : 0),
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            if (index >= schedules.length) {
+                              return LoadMoreTile(
+                                onPressed: viewModel.loadMoreSchedules,
+                                isLoading: state.isLoadingMoreSchedules,
+                                errorMessage: state.scheduleErrorMessage,
+                                label:
+                                    'Muat ${FirestorePageSize.value} jadwal lainnya',
+                              );
+                            }
+                            return _ScheduleCard(
+                              schedule: schedules[index],
+                              onOpen: () => context.push(
+                                '/schedules/${schedules[index].id}',
+                              ),
+                              onEdit: () =>
+                                  _openForm(schedule: schedules[index]),
+                            );
+                          },
                         ),
                       ),
                     ),

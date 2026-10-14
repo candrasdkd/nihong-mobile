@@ -36,6 +36,22 @@ class MenuScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: isSigningOut
+                ? null
+                : () => ref.read(authViewModelProvider.notifier).signOut(),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+              side: BorderSide(
+                color: Theme.of(
+                  context,
+                ).colorScheme.error.withValues(alpha: 0.4),
+              ),
+            ),
+            icon: const Icon(Icons.logout),
+            label: Text(isSigningOut ? 'Mengeluarkan sesi…' : 'Keluar'),
+          ),
+          const SizedBox(height: 20),
           _MenuItem(
             icon: Icons.calendar_month_outlined,
             label: 'Jadwal keberangkatan',
@@ -60,14 +76,6 @@ class MenuScreen extends ConsumerWidget {
             icon: Icons.badge_outlined,
             label: 'Jastiper',
             onTap: () => context.push('/jastipers'),
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: isSigningOut
-                ? null
-                : () => ref.read(authViewModelProvider.notifier).signOut(),
-            icon: const Icon(Icons.logout),
-            label: Text(isSigningOut ? 'Mengeluarkan sesi…' : 'Keluar'),
           ),
         ],
       ),

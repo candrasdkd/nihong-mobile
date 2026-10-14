@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/formatting/safe_calendar_date.dart';
 import '../../../../core/widgets/app_loading_view.dart';
+import '../../../../core/widgets/load_more_tile.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../data/models/pre_order.dart';
 import '../providers/pre_orders_view_model.dart';
@@ -81,6 +83,7 @@ class PreOrdersScreen extends ConsumerWidget {
   }
 
   Widget _body(BuildContext context, WidgetRef ref, PreOrdersState state) {
+    final viewModel = ref.read(preOrdersViewModelProvider.notifier);
     if (state.isLoading && state.preOrders.isEmpty) {
       return const AppLoadingView(message: 'Memuat booking…');
     }
@@ -93,22 +96,76 @@ class PreOrdersScreen extends ConsumerWidget {
 
     final bookings = state.filteredPreOrders;
     if (bookings.isEmpty) {
-      return _EmptyBookings(
-        hasFilters: state.query.isNotEmpty || state.statusFilter != 'Semua',
-        onCreate: () => _openForm(context, ref),
+      return Column(
+        children: [
+          Expanded(
+            child: state.hasMore
+                ? NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification.metrics.pixels >=
+                          notification.metrics.maxScrollExtent - 240) {
+                        viewModel.loadMore();
+                      }
+                      return false;
+                    },
+                    child: ListView(
+                      children: [
+                        SizedBox(
+                          height: 260,
+                          child: _EmptyBookings(
+                            hasFilters:
+                                state.query.isNotEmpty ||
+                                state.statusFilter != 'Semua',
+                            onCreate: () => _openForm(context, ref),
+                          ),
+                        ),
+                        LoadMoreTile(
+                          onPressed: viewModel.loadMore,
+                          isLoading: state.isLoadingMore,
+                          errorMessage: state.errorMessage,
+                        ),
+                      ],
+                    ),
+                  )
+                : _EmptyBookings(
+                    hasFilters:
+                        state.query.isNotEmpty || state.statusFilter != 'Semua',
+                    onCreate: () => _openForm(context, ref),
+                  ),
+          ),
+        ],
       );
     }
 
     return RefreshIndicator(
       onRefresh: () async =>
           ref.read(preOrdersViewModelProvider.notifier).retry(),
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-        itemCount: bookings.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, index) => _PreOrderCard(
-          preOrder: bookings[index],
-          onTap: () => context.push('/preorders/${bookings[index].id}'),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification.metrics.pixels >=
+              notification.metrics.maxScrollExtent - 240) {
+            viewModel.loadMore();
+          }
+          return false;
+        },
+        child: ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+          itemCount: bookings.length + (state.hasMore ? 1 : 0),
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            if (index >= bookings.length) {
+              return LoadMoreTile(
+                onPressed: viewModel.loadMore,
+                isLoading: state.isLoadingMore,
+                errorMessage: state.errorMessage,
+                label: 'Muat ${FirestorePageSize.value} booking lainnya',
+              );
+            }
+            return _PreOrderCard(
+              preOrder: bookings[index],
+              onTap: () => context.push('/preorders/${bookings[index].id}'),
+            );
+          },
         ),
       ),
     );

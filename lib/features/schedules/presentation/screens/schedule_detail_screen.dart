@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/design_system/app_colors.dart';
+import '../../../../core/firestore/firestore_page_size.dart';
 import '../../../../core/formatting/safe_calendar_date.dart';
 import '../../../../core/widgets/app_loading_view.dart';
+import '../../../../core/widgets/load_more_tile.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../../pre_orders/data/models/pre_order.dart';
 import '../../data/models/departure_schedule.dart';
+import '../../data/schedule_data_source.dart';
 import '../../data/schedule_repository.dart';
 
 class ScheduleDetailScreen extends ConsumerWidget {
@@ -48,7 +51,7 @@ class ScheduleDetailScreen extends ConsumerWidget {
   }
 }
 
-class _ScheduleDetailContent extends ConsumerWidget {
+class _ScheduleDetailContent extends ConsumerStatefulWidget {
   const _ScheduleDetailContent({
     required this.schedule,
     required this.isFromCache,
@@ -58,66 +61,123 @@ class _ScheduleDetailContent extends ConsumerWidget {
   final bool isFromCache;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final preOrdersAsync = ref.watch(schedulePreOrdersProvider(schedule.id));
+  ConsumerState<_ScheduleDetailContent> createState() =>
+      _ScheduleDetailContentState();
+}
+
+class _ScheduleDetailContentState
+    extends ConsumerState<_ScheduleDetailContent> {
+  int _limitCount = FirestorePageSize.value;
+  bool _isLoadingMore = false;
+  SchedulePreOrderQuerySnapshot? _lastSnapshot;
+  String? _loadMoreError;
+
+  @override
+  Widget build(BuildContext context) {
+    final request = (scheduleId: widget.schedule.id, limitCount: _limitCount);
+    final provider = schedulePreOrdersProvider(request);
+    final preOrdersAsync = ref.watch(provider);
+    ref.listen(provider, (previous, next) {
+      if (next.hasValue) {
+        _lastSnapshot = next.value;
+        _isLoadingMore = false;
+      } else if (next.hasError && _isLoadingMore) {
+        _isLoadingMore = false;
+        _loadMoreError = _preOrderErrorMessage(next.error!);
+        _limitCount -= FirestorePageSize.value;
+      }
+    });
+    final snapshot = preOrdersAsync.asData?.value ?? _lastSnapshot;
+    final isLoadingMore = _isLoadingMore && preOrdersAsync.isLoading;
+    final loadMoreError =
+        _loadMoreError ??
+        (preOrdersAsync.hasError
+            ? _preOrderErrorMessage(preOrdersAsync.error!)
+            : null);
+    final hasMore =
+        (snapshot?.preOrders.length ?? 0) >= _limitCount ||
+        isLoadingMore ||
+        loadMoreError != null;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Detail jadwal')),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          children: [
-            if (isFromCache) const _ScheduleDetailCacheNotice(),
-            _ScheduleOverviewCard(schedule: schedule),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Pre-order terkait',
-                    style: TextStyle(
-                      color: AppColors.navyDark,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 240) {
+              _loadMore(snapshot);
+            }
+            return false;
+          },
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              if (widget.isFromCache) const _ScheduleDetailCacheNotice(),
+              _ScheduleOverviewCard(schedule: widget.schedule),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Pre-order terkait',
+                      style: TextStyle(
+                        color: AppColors.navyDark,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  'Jadwal ${schedule.id}',
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 11,
+                  Text(
+                    'Jadwal ${widget.schedule.id}',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                    ),
                   ),
-                ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (snapshot == null && preOrdersAsync.hasError)
+                _DetailError(
+                  message: loadMoreError!,
+                  onRetry: () => ref.invalidate(provider),
+                )
+              else if (snapshot == null)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: AppLoadingView(message: 'Memuat pre-order…'),
+                )
+              else ...[
+                if (snapshot.isFromCache) const _ScheduleDetailCacheNotice(),
+                _PreOrderResults(preOrders: snapshot.preOrders),
+                if (hasMore)
+                  LoadMoreTile(
+                    onPressed: () => _loadMore(snapshot),
+                    isLoading: isLoadingMore,
+                    errorMessage: loadMoreError,
+                    label: 'Muat ${FirestorePageSize.value} booking lainnya',
+                  ),
               ],
-            ),
-            const SizedBox(height: 10),
-            preOrdersAsync.when(
-              loading: () => const Padding(
-                padding: EdgeInsets.all(24),
-                child: AppLoadingView(message: 'Memuat pre-order…'),
-              ),
-              error: (error, _) => _DetailError(
-                message: _preOrderErrorMessage(error),
-                onRetry: () =>
-                    ref.invalidate(schedulePreOrdersProvider(schedule.id)),
-              ),
-              data: (snapshot) {
-                if (snapshot.isFromCache) {
-                  return Column(
-                    children: [
-                      const _ScheduleDetailCacheNotice(),
-                      _PreOrderResults(preOrders: snapshot.preOrders),
-                    ],
-                  );
-                }
-                return _PreOrderResults(preOrders: snapshot.preOrders);
-              },
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  void _loadMore([SchedulePreOrderQuerySnapshot? currentSnapshot]) {
+    final snapshot = currentSnapshot ?? _lastSnapshot;
+    if (_isLoadingMore ||
+        snapshot == null ||
+        snapshot.preOrders.length < _limitCount) {
+      return;
+    }
+    setState(() {
+      _isLoadingMore = true;
+      _loadMoreError = null;
+      _limitCount += FirestorePageSize.value;
+    });
   }
 }
 
