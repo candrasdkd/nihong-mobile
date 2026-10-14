@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "52461842773",
+    "firebase_url": "https://nihong-4b93e-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "nihong-4b93e",
+    "storage_bucket": "nihong-4b93e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:52461842773:android:5c6af10e24b268b90affdc",
+        "android_client_info": {
+          "package_name": "com.nihongjastip"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYYnuNXyBTIGToBHONA2tQtpXaLQDsPzc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

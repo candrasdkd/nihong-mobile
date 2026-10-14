@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "777940685146",
+    "project_id": "nihongstore-6210b",
+    "storage_bucket": "nihongstore-6210b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777940685146:android:bddbdbc8967089c0c32363",
+        "android_client_info": {
+          "package_name": "com.nihongjastip"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUiXTi_ZnT4u7C5ZpqXBFssMUAqmnPAT4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
